@@ -308,7 +308,7 @@ class BlobDetector(object):
                 flag=1
             timing=time.time()-start
 
-            if abs(relX)<50:
+            if  abs(relX) <=50:
                 if timing<4:
                     print timing
                     print 'straight straight'
@@ -318,20 +318,21 @@ class BlobDetector(object):
                     time.sleep(1)
                 elif timing<6:
                     print timing
-                    print "straight turn1"
+                    print "straight"
                     twistMsg.angular.z = -math.atan(math.pi/2)
                     twistMsg.linear.x = 0.0
                     self.basePublisher.publish(twistMsg)
                     time.sleep(1)
-                elif timing<10.5:
+                elif timing<10:
                     print timing
-                    print "straight turn2"
+                    print "straight"
                     twistMsg.angular.z = math.atan(math.pi/2)
                     twistMsg.linear.x = 0.0
                     self.basePublisher.publish(twistMsg)
                     time.sleep(1)
                 else:
                     flag=0
+
             elif relX<-50:
                 if timing<3.5:
                     print timing
