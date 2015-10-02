@@ -122,8 +122,8 @@ class BlobDetector(object):
         imgBlob[:,:,1] = self.imgred
         
         # draws a red circle on each blob center
-        #for b in blobs:
-            #cv2.circle(imgBlob, (b[0], b[1]), 10, (0,0,255), thickness=-1)
+        for b in blobs:
+            cv2.circle(imgBlob, (b[0], b[1]), 10, (0,0,255), thickness=-1)
 
         cv2.imshow('blobs', imgBlob)
         cv2.waitKey(10)
@@ -291,6 +291,7 @@ class BlobDetector(object):
 			v.press_unicode(ord('c'))
 			v.release_unicode(ord('c'))
 			v.release_keysym(65507)
+
                         self.basePublisher.publish(twistMsg)
 
                     
@@ -315,14 +316,14 @@ class BlobDetector(object):
                     twistMsg.linear.x = 0.2
                     self.basePublisher.publish(twistMsg)
                     time.sleep(1)
-                elif timing<5.8:
+                elif timing<6:
                     print timing
                     print "straight turn1"
                     twistMsg.angular.z = -math.atan(math.pi/2)
                     twistMsg.linear.x = 0.0
                     self.basePublisher.publish(twistMsg)
                     time.sleep(1)
-                elif timing<10.1:
+                elif timing<10.5:
                     print timing
                     print "straight turn2"
                     twistMsg.angular.z = math.atan(math.pi/2)
@@ -331,7 +332,7 @@ class BlobDetector(object):
                     time.sleep(1)
                 else:
                     flag=0
-            else:
+            elif relX<-50:
                 if timing<3.5:
                     print timing
                     print "truning straight"
@@ -341,18 +342,30 @@ class BlobDetector(object):
                     time.sleep(1)
                 elif timing<10:
                     print timing
-                    print "turning right"
-                    twistMsg.angular.z = -0.2
-                    twistMsg.linear.x = 0.0
-                    self.basePublisher.publish(twistMsg)
-                    time.sleep(1)
-                elif timing<23:
-                    print timing
                     print "turning left"
                     twistMsg.angular.z = 0.2
                     twistMsg.linear.x = 0.0
                     self.basePublisher.publish(twistMsg)
                     time.sleep(1)
+
+                else:
+                    flag=0
+            elif relX >50:
+                if timing<3.5:
+                    print timing
+                    print "truning straight"
+                    twistMsg.angular.z = 0.0
+                    twistMsg.linear.x = 0.1
+                    self.basePublisher.publish(twistMsg)
+                    time.sleep(1)
+                elif timing<10:
+                    print timing
+                    print "turning "
+                    twistMsg.angular.z = -0.2
+                    twistMsg.linear.x = 0.0
+                    self.basePublisher.publish(twistMsg)
+                    time.sleep(1)
+
                 else:
                     flag=0
 
