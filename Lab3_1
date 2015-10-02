@@ -1,0 +1,407 @@
+#!/usr/bin/python
+
+"""
+pybot_blob: Blob detect and seek demo
+
+------------
+Mode of use
+------------
+$ rosrun pybot pybot_blob _topic:=<image_topic>
+
+_topic: compressed image topic path, default 'camera/rgb/image_color/compressed'
+
+"""
+
+__author__      = 'Juan David Adarve'
+__email__       = 'juan.adarve@anu.edu.au'
+__license__     = 'MIT'
+__copyright__   = 'Copyright 2015, Australian Centre for Robotic Vision'
+
+import rospy
+import cv2
+import numpy as np
+import sys
+import math
+import time
+import webbrowser
+import subprocess
+import virtkey
+
+from create_node.msg import TurtlebotSensorState
+from geometry_msgs.msg import Twist
+
+import pybot_vision as pyvis
+
+
+class BlobDetector(object):
+    
+    
+    def __init__(self):
+        
+        # publisher for base velocity (linear, angular)
+        self.basePublisher = rospy.Publisher('/cmd_vel_mux/input/navi', Twist)
+        
+        # Subscriber to the turtlebot base
+        self.baseSubscriber = rospy.Subscriber('/mobile_base/sensors/core',
+                                               TurtlebotSensorState,
+                                               self.baseCallback,
+                                               queue_size=1)
+        
+        # tells whether the turtlebot bumper is pressed
+        self.bumper = False
+        
+        # HSV color threshold for blue markers
+        #self.colorMin = np.array([75, 130, 60])
+        #self.colorMax = np.array([130, 255, 255])
+	self.colorMin = np.array([200, 200, 200])
+        self.colorMax = np.array([255, 255, 255])
+	self.colormi = np.array([0, 0, 149])
+        self.colorma = np.array([60, 60, 255])
+        
+        # structuring element for morphology operations
+        self.SE = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.uint8)
+    
+    
+    def baseCallback(self, msg):
+        """
+        Callback function for turtlebot base sensors
+        
+        """
+        
+        # assign True to the bumper variable if the turtlebot bumper is pressed 
+        self.bumper = msg.bumps_wheeldrops != 0
+        
+    
+    def imageCallback(self, img):
+        """
+        Callback function for image processing
+        
+        This function is called every time a new image arrives to the
+        image receiver.
+        
+        -----------
+        Parameters
+        -----------
+        
+        img: numpy array with the color image in BGR format
+        """
+
+        # reduce the resolution of the image to half to allow for
+        # faster processing
+	a = cv2.resize(img, (320,240))
+        imgBGR = a[140:210,:]
+        imshape = imgBGR.shape
+        
+        # convert image to HSV    
+        # self.imgHSV = cv2.cvtColor(imgBGR, cv2.COLOR_BGR2HSV)
+	self.imgBGR = imgBGR
+        
+        # color threshold
+        self.imgbin = cv2.inRange(self.imgBGR, self.colorMin, self.colorMax)
+        # red color threshold
+        self.imgred = cv2.inRange(self.imgBGR, self.colormi, self.colorma)
+        
+        # 2 iterations of image erosion
+        for _ in xrange(2):
+            self.imgbin = cv2.erode(self.imgbin, self.SE)
+            self.imgred = cv2.erode(self.imgred, self.SE)#red
+            
+        # return a list of blobs in the binary image. Each
+        # blob is made of a tuple (x, y, S) where S is the number
+        # of points that make the countour of the blob
+        blobs = self.detectBlobs(np.copy(self.imgbin))
+        red =self.detectRed(np.copy(self.imgred))
+        #print self.imgred.shape[0]
+        self.moveToBlob(blobs,red)
+        
+        
+        # WINDOW DISPLAY
+        # color image to be displayed on window
+        imgBlob = np.zeros(imshape, dtype=np.uint8)
+        imgBlob[:,:,0] = self.imgbin
+        imgBlob[:,:,1] = self.imgred
+        
+        # draws a red circle on each blob center
+        #for b in blobs:
+            #cv2.circle(imgBlob, (b[0], b[1]), 10, (0,0,255), thickness=-1)
+
+        cv2.imshow('blobs', imgBlob)
+        cv2.waitKey(10)
+    
+    def detectRed(self, imgred):
+        """
+        Detect blobs in a binary image by extracting contours
+        
+        Returns
+        --------
+        A list of blobs where each element is a 3 vector (x, y, S) where
+        x and y is the average position of the blob contour and S is the
+        number of points that form the contour
+        """
+
+        # extract the contours of the binary blobs
+        contours, _ = cv2.findContours(imgred, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        
+        # return blob list with the position and size of the blob
+        red = list()
+        
+        # for each contour in the contour list
+        for c in contours:
+            
+            # each contour c is stored as a vector of points of dimensions
+            # [N, 1, 2] where N is the number of points that make the contour
+            # with the last dimension of the (x, y) coordinates
+            
+            # contour average position
+            avgX = np.sum(c[:,0,0]) / c.shape[0]
+            avgY = np.sum(c[:,0,1]) / c.shape[0]
+            red.append(np.array([avgX, avgY, c.shape[0]]))
+        
+        return red
+
+    def detectBlobs(self, binimg):
+        """
+        Detect blobs in a binary image by extracting contours
+        
+        Returns
+        --------
+        A list of blobs where each element is a 3 vector (x, y, S) where
+        x and y is the average position of the blob contour and S is the
+        number of points that form the contour
+        """
+
+        # extract the contours of the binary blobs
+        contours, _ = cv2.findContours(binimg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        
+        # return blob list with the position and size of the blob
+        blobs = list()
+        
+        # for each contour in the contour list
+        for c in contours:
+            
+            # each contour c is stored as a vector of points of dimensions
+            # [N, 1, 2] where N is the number of points that make the contour
+            # with the last dimension of the (x, y) coordinates
+            
+            # contour average position
+            avgX = np.sum(c[:,0,0]) / c.shape[0]
+            avgY = np.sum(c[:,0,1]) / c.shape[0]
+            blobs.append(np.array([avgX, avgY, c.shape[0]]))
+        
+        return blobs
+    
+    
+    def moveToBlob(self, blobs, red):
+        """
+        Select a blob from the blobs list and moves towards it
+        
+        ----------
+        Parameters
+        ----------
+        
+        blobs: list of blob markers. Each element in the list is an
+        array (x, y, S) with the (x,y) position of the marker and
+        the size S of the blob contour
+        """
+        
+        # if the blob list is not empty
+        global twistMsg, flag, relX, timing, redflag
+
+
+        
+        if len(red)>0:
+            redflag=1
+           
+        print "red", redflag
+        
+            
+        if len(blobs) > 0:
+            flag=0
+            # search for the biggest blob in the list
+            bigBlob = blobs[0]
+            for b in blobs:
+                # compare the size of the blob
+                if bigBlob[2] < b[2]:
+                    bigBlob = b
+             
+            # move the turtlebot only if the bumper signal is not active
+            if not self.bumper:
+                
+                ############################
+                # turtlebot velocity control
+                ############################
+                 
+                # relative X position with respect to image centre
+                relX = bigBlob[0] - 160
+                
+                # proportional gain as a function of relative position error
+                r = 1 - np.exp(-0.1*(relX*relX)/160)
+                
+                # print the position of bigBlob and the gain
+                print('{0}: r: {1}'.format(bigBlob, r))
+
+                ############################
+                # message publishing
+                ############################
+                # creates a Twist message with angular and linear velocity
+
+                twistMsg = Twist()
+
+                print bigBlob[2]
+                if redflag==0:
+		    if relX > 0:
+		        print relX
+                        print "normal straight"
+                        twistMsg.angular.z = r*-0.2
+                        twistMsg.linear.x = 0.2
+	            else:
+		        print relX
+                        print "normal straight"
+		        twistMsg.angular.z = r*0.2
+		        twistMsg.linear.x = 0.2
+		else:
+		    global flag
+                    global start
+                    global timing
+                    global relX
+                    
+                    if flag1==0:
+                        start=time.time()
+                        flag1=1
+                    timing=time.time()-start
+           
+                    if timing<5:
+                        print "red straight"
+		    	if relX > 0:
+		    	    print relX
+                    	    
+                    	    twistMsg.angular.z = r*-0.2
+                    	    twistMsg.linear.x = 0.2
+	            	else:
+		    	    print relX
+                    	    
+		    	    twistMsg.angular.z = r*0.2
+		    	    twistMsg.linear.x = 0.2
+                    else:
+                        print 'blobs stop'
+                        twistMsg.angular.z = 0.0
+                        twistMsg.linear.x = 0.0
+                        v=virtkey.virtkey()
+			v.press_keysym(65507)
+			v.press_unicode(ord('c'))
+			v.release_unicode(ord('c'))
+			v.release_keysym(65507)
+                        self.basePublisher.publish(twistMsg)
+
+                    
+        else:
+            global flag
+            global start
+            global timing
+            global relX
+            global flag1
+            print "blind"
+                        
+            if flag==0:
+                start=time.time()
+                flag=1
+            timing=time.time()-start
+
+            if abs(relX)<50:
+                if timing<4:
+                    print timing
+                    print 'straight straight'
+                    twistMsg.angular.z = 0.0
+                    twistMsg.linear.x = 0.2
+                    self.basePublisher.publish(twistMsg)
+                    time.sleep(1)
+                elif timing<5.8:
+                    print timing
+                    print "straight turn1"
+                    twistMsg.angular.z = -math.atan(math.pi/2)
+                    twistMsg.linear.x = 0.0
+                    self.basePublisher.publish(twistMsg)
+                    time.sleep(1)
+                elif timing<10.1:
+                    print timing
+                    print "straight turn2"
+                    twistMsg.angular.z = math.atan(math.pi/2)
+                    twistMsg.linear.x = 0.0
+                    self.basePublisher.publish(twistMsg)
+                    time.sleep(1)
+                else:
+                    flag=0
+            else:
+                if timing<3.5:
+                    print timing
+                    print "truning straight"
+                    twistMsg.angular.z = 0.0
+                    twistMsg.linear.x = 0.1
+                    self.basePublisher.publish(twistMsg)
+                    time.sleep(1)
+                elif timing<10:
+                    print timing
+                    print "turning right"
+                    twistMsg.angular.z = -0.2
+                    twistMsg.linear.x = 0.0
+                    self.basePublisher.publish(twistMsg)
+                    time.sleep(1)
+                elif timing<23:
+                    print timing
+                    print "turning left"
+                    twistMsg.angular.z = 0.2
+                    twistMsg.linear.x = 0.0
+                    self.basePublisher.publish(twistMsg)
+                    time.sleep(1)
+                else:
+                    flag=0
+
+
+
+                
+                # publish message to topic
+        self.basePublisher.publish(twistMsg)
+
+                
+                # publish message to topic
+        self.basePublisher.publish(twistMsg)
+
+
+###########################################################
+# ENTRY POINT
+###########################################################
+if __name__ == '__main__':
+    global relX, redflag, flag1
+    relX=50
+    redflag=0
+    flag1=0
+    # initialise ROS node
+    rospy.init_node('pybot_blob')
+    
+    rospy.loginfo('pybot_blob started')
+    subprocess.call(['/usr/bin/canberra-gtk-play', '--id', 'dialog-question'])
+    
+    #webbrowser.open("/home/ros/beep4.mp3")
+    
+    # image topic
+    topic = rospy.get_param('pybot_blob/topic', 'camera/rgb/image_color/compressed')
+    
+    # creates an image receiver connected to the image_color topic (remote, compressed)
+    imgReceiver = pyvis.ImageReceiver(topic, compressed=True)
+
+    # creates an image viewer and subscribe it to the callback list of imgRecevier
+    imgViewer = pyvis.ImageViewer()
+    imgReceiver.addImageListener(imgViewer.imageCallback)
+    
+    # creates the blob hunter and add it to the image receiver callback list
+    blobHunter = BlobDetector()
+    imgReceiver.addImageListener(blobHunter.imageCallback)
+    
+    
+    try:
+        # call rospy.spin() to wait
+        rospy.spin()
+    except KeyboardInterrupt:
+        print('pybot_blob: keyboard interrupt, shutting down')
+    webbrowser.open("/home/ros/threeblindmice.mp3")
+    cv2.destroyAllWindows()
