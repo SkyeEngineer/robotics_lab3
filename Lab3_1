@@ -11,7 +11,7 @@ $ rosrun pybot pybot_blob _topic:=<image_topic>
 _topic: compressed image topic path, default 'camera/rgb/image_color/compressed'
 
 """
-#####################
+
 __author__      = 'Juan David Adarve'
 __email__       = 'juan.adarve@anu.edu.au'
 __license__     = 'MIT'
